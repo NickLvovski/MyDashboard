@@ -21,8 +21,10 @@ final class DashboardStore: ObservableObject {
         fileURL = directory.appendingPathComponent("dashboard.json")
         if FileManager.default.fileExists(atPath: fileURL.path) {
             do {
-                document = try Self.readDocument(at: fileURL)
+                let loaded = try Self.readDocument(at: fileURL)
+                document = loaded.document
                 savedAt = try fileURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+                if loaded.needsMigration { _ = save(document, migratingLegacy: true) }
             } catch {
                 recoveryRequired = true
                 notice = AppNotice(title: "Не удалось прочитать данные", message: "Исходный файл сохранён. Откройте раздел «Данные», сохраните повреждённый файл и восстановите резервную копию. \(error.localizedDescription)")
@@ -35,7 +37,7 @@ final class DashboardStore: ObservableObject {
     func goal(for task: LifeTask) -> LifeGoal? { goals.first { $0.id == task.goalID } }
 
     @discardableResult
-    func save(_ updated: DashboardDocument, allowRecovery: Bool = false) -> Bool {
+    func save(_ updated: DashboardDocument, allowRecovery: Bool = false, migratingLegacy: Bool = false) -> Bool {
         if recoveryRequired && !allowRecovery {
             notice = AppNotice(title: "Сначала восстановите данные", message: "Исходный файл не будет перезаписан. Используйте раздел «Данные».")
             return false
@@ -46,7 +48,10 @@ final class DashboardStore: ObservableObject {
             // Preserve the previous readable document before replacing it atomically.
             if FileManager.default.fileExists(atPath: fileURL.path) {
                 let previous = try Data(contentsOf: fileURL)
-                let previousName = recoveryRequired ? "dashboard.recovery-\(UUID().uuidString).json" : "dashboard.previous.json"
+                let previousName: String
+                if recoveryRequired { previousName = "dashboard.recovery-\(UUID().uuidString).json" }
+                else if migratingLegacy { previousName = "dashboard.migration-\(UUID().uuidString).json" }
+                else { previousName = "dashboard.previous.json" }
                 try previous.write(to: fileURL.deletingLastPathComponent().appendingPathComponent(previousName), options: .atomic)
             }
             try data.write(to: fileURL, options: .atomic)
@@ -95,7 +100,7 @@ final class DashboardStore: ObservableObject {
         panel.allowedContentTypes = [.json]; panel.allowsMultipleSelection = false; panel.canChooseDirectories = false
         panel.message = "Выберите резервную копию. Данные будут проверены перед восстановлением."
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
-        do { return try Self.readDocument(at: url) }
+        do { return try Self.readDocument(at: url).document }
         catch { notice = AppNotice(title: "Не удалось открыть копию", message: error.localizedDescription); return nil }
     }
     func exportText(_ text: String) {
@@ -110,9 +115,10 @@ final class DashboardStore: ObservableObject {
         let panel = NSSavePanel(); panel.nameFieldStringValue = name; panel.allowedContentTypes = [type]; panel.canCreateDirectories = true
         if panel.runModal() == .OK, let url = panel.url { try data.write(to: url, options: .atomic) }
     }
-    private static func readDocument(at url: URL) throws -> DashboardDocument {
+    private static func readDocument(at url: URL) throws -> (document: DashboardDocument, needsMigration: Bool) {
         let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        guard size <= 5_000_000 else { throw DataError.invalid("Файл больше 5 МБ.") }
-        return try DashboardDocument.decode(Data(contentsOf: url))
+        try DashboardDocument.checkFileSize(size)
+        let data = try Data(contentsOf: url)
+        return (try DashboardDocument.decode(data), try DashboardDocument.fileVersion(in: data) == 1)
     }
 }

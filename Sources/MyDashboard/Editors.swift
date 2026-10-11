@@ -13,10 +13,10 @@ struct GoalEditor: View {
 
     init(goal: LifeGoal) {
         _draft = State(initialValue: goal)
-        _currentText = State(initialValue: numberText(goal.current))
-        _targetText = State(initialValue: numberText(goal.target))
+        _currentText = State(initialValue: editableNumberText(goal.current))
+        _targetText = State(initialValue: editableNumberText(goal.target))
         _hasDeadline = State(initialValue: goal.deadline != nil)
-        _deadline = State(initialValue: goal.deadline ?? Date())
+        _deadline = State(initialValue: goal.deadline?.date() ?? Date())
     }
     private var isNew: Bool { !store.goals.contains { $0.id == draft.id } }
     var body: some View {
@@ -55,17 +55,10 @@ struct GoalEditor: View {
         }.padding(26).frame(width: 540).tint(Palette.green).onAppear { titleFocused = true }
     }
     private func save() {
-        draft.title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !draft.title.isEmpty, draft.title.count <= 140 else { error = "Введите название до 140 символов."; return }
-        guard draft.details.count <= 2000, draft.unit.count <= 30 else { error = "Описание — до 2000 символов, единица измерения — до 30."; return }
-        if draft.mode == .metric {
-            guard let current = parseNumber(currentText), current.isFinite, current >= 0,
-                  let target = parseNumber(targetText), target.isFinite, target > 0 else {
-                error = "Текущее значение должно быть неотрицательным числом, а целевое — больше нуля."; return
-            }
-            draft.current = current; draft.target = target
-        } else { draft.current = 0; draft.target = 1; draft.unit = "" }
-        draft.deadline = hasDeadline ? Calendar.current.startOfDay(for: deadline) : nil
+        do {
+            draft = try validatedGoalDraft(draft, currentText: currentText, targetText: targetText,
+                                           deadline: hasDeadline ? CivilDate(deadline) : nil)
+        } catch { self.error = error.localizedDescription; return }
         if store.upsert(draft) { dismiss() }
         else { error = store.notice?.message ?? "Не удалось сохранить цель."; store.notice = nil }
     }
@@ -83,7 +76,7 @@ struct TaskEditor: View {
     init(task: LifeTask) {
         _draft = State(initialValue: task)
         _hasDue = State(initialValue: task.dueDate != nil)
-        _due = State(initialValue: task.dueDate ?? Date())
+        _due = State(initialValue: task.dueDate?.date() ?? Date())
     }
     private var isNew: Bool { !store.tasks.contains { $0.id == draft.id } }
     var body: some View {
@@ -112,10 +105,8 @@ struct TaskEditor: View {
         }.padding(26).frame(width: 520).tint(Palette.green).onAppear { titleFocused = true }
     }
     private func save() {
-        draft.title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !draft.title.isEmpty, draft.title.count <= 240 else { error = "Введите название задачи до 240 символов."; return }
-        draft.dueDate = hasDue ? Calendar.current.startOfDay(for: due) : nil
-        draft.completedAt = draft.isDone ? (draft.completedAt ?? Date()) : nil
+        do { draft = try validatedTaskDraft(draft, dueDate: hasDue ? CivilDate(due) : nil) }
+        catch { self.error = error.localizedDescription; return }
         if store.upsert(draft) { dismiss() }
         else { error = store.notice?.message ?? "Не удалось сохранить задачу."; store.notice = nil }
     }

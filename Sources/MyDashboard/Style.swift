@@ -156,7 +156,7 @@ struct TaskRow: View {
                 }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
             }.buttonStyle(.plain).help("Редактировать задачу")
             if let due = task.dueDate {
-                Text(Calendar.current.isDateInToday(due) ? "Сегодня" : russianDate(due))
+                Text(TaskFilter.today.includes(task) ? "Сегодня" : russianDate(due))
                     .font(.system(size: 10)).foregroundStyle(TaskFilter.overdue.includes(task) ? Color(hex: 0xB77B61) : Palette.muted)
             }
             Menu {
